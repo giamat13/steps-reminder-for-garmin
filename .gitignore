@@ -1,0 +1,17 @@
+# Garmin Connect IQ Build Files
+bin/
+.vscode/
+*.prg
+*.iq
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# IDE Files
+*.sublime-*
+.idea/
+
+# Logs
+*.log
+npm-debug.log*

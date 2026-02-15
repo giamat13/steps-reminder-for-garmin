@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<settings xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://developer.garmin.com/downloads/connect-iq/settings.xsd">
+    <setting propertyKey="@Properties.usePercent" title="@Strings.UsePercentTitle">
+        <settingConfig type="boolean" />
+    </setting>
+    
+    <setting propertyKey="@Properties.timeThreshold" title="@Strings.TimeThresholdTitle" prompt="@Strings.TimeThresholdPrompt">
+        <settingConfig type="numeric" min="0" max="1440" />
+    </setting>
+    
+    <setting propertyKey="@Properties.stepsThreshold" title="@Strings.StepsThresholdTitle" prompt="@Strings.StepsThresholdPrompt">
+        <settingConfig type="numeric" min="0" max="50000" />
+    </setting>
+</settings>

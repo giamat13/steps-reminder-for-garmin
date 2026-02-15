@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<properties xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://developer.garmin.com/downloads/connect-iq/properties.xsd">
+    <!-- Use percentage mode (true) or absolute values (false) -->
+    <property id="usePercent" type="boolean">true</property>
+    
+    <!-- Time threshold: 
+         If usePercent=true: percentage of day (0-100)
+         If usePercent=false: minutes from midnight (0-1440) -->
+    <property id="timeThreshold" type="number">50</property>
+    
+    <!-- Steps threshold:
+         If usePercent=true: percentage of step goal (0-100)
+         If usePercent=false: absolute number of steps -->
+    <property id="stepsThreshold" type="number">50</property>
+</properties>

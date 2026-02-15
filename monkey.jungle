@@ -1,1 +1,11 @@
 project.manifest = manifest.xml
+
+# Base settings
+base.sourcePath = source
+base.resourcePath = resources
+
+# Hebrew language support
+heb.resourcePath = $(heb.resourcePath);resources-heb
+
+# Fenix 7 Pro specific settings
+fenix7pro.resourcePath = $(fenix7pro.resourcePath);resources
