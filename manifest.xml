@@ -1,12 +1,14 @@
 <?xml version="1.0"?>
 <iq:manifest version="3" xmlns:iq="http://www.garmin.com/xml/connectiq">
-    <iq:application id="88555377-12d3-4324-b68e-03ed6e83c393" type="watch-app" name="@Strings.AppName" entry="steps_reminderApp" launcherIcon="@Drawables.LauncherIcon" minApiLevel="5.0.0">
+    <iq:application id="88555377-12d3-4324-b68e-03ed6e83c393" type="watch-app" name="@Strings.AppName" entry="steps_reminderApp" launcherIcon="@Drawables.LauncherIcon" minApiLevel="5.2.0">
         <iq:products>
             <iq:product id="fenix7pro"/>
         </iq:products>
         <iq:permissions>
-            <iq:uses-permission id="UserProfile"/>
             <iq:uses-permission id="Background"/>
+            <iq:uses-permission id="Communications"/>
+            <iq:uses-permission id="PersistedContent"/>
+            <iq:uses-permission id="UserProfile"/>
         </iq:permissions>
         <iq:languages>
             <iq:language>eng</iq:language>

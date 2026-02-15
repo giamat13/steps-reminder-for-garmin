@@ -4,30 +4,44 @@ import Toybox.ActivityMonitor;
 import Toybox.System;
 import Toybox.Time;
 import Toybox.Lang;
+import Toybox.Timer;
+import Toybox.Application;
 
 class steps_reminderView extends WatchUi.View {
     private var _stepsLabel as String?;
     private var _progressLabel as String?;
+    private var _learningLabel as String?;
+    private var _updateTimer as Timer.Timer?;
 
     function initialize() {
         View.initialize();
+        _updateTimer = new Timer.Timer();
     }
 
-    // Load your resources here
     function onLayout(dc as Dc) as Void {
-        // We'll draw custom UI instead of using layout XML
     }
 
-    // Called when this View is brought to the foreground
     function onShow() as Void {
         updateLabels();
+        
+        if (_updateTimer != null) {
+            _updateTimer.start(method(:timerCallback), 10000, true);
+        }
     }
 
-    // Update the view
+    function onHide() as Void {
+        if (_updateTimer != null) {
+            _updateTimer.stop();
+        }
+    }
+
+    function timerCallback() as Void {
+        WatchUi.requestUpdate();
+    }
+
     function onUpdate(dc as Dc) as Void {
         updateLabels();
         
-        // Clear the screen
         dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_BLACK);
         dc.clear();
         
@@ -35,36 +49,41 @@ class steps_reminderView extends WatchUi.View {
         var height = dc.getHeight();
         var centerX = width / 2;
         
-        // Draw title
+        // כותרת
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(centerX, height / 4, Graphics.FONT_MEDIUM, 
+        dc.drawText(centerX, height / 6, Graphics.FONT_MEDIUM, 
                    WatchUi.loadResource(Rez.Strings.AppName), 
                    Graphics.TEXT_JUSTIFY_CENTER);
         
-        // Draw steps info
+        // מידע על צעדים
         if (_stepsLabel != null) {
-            dc.drawText(centerX, height / 2 - 30, Graphics.FONT_SMALL, 
+            dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(centerX, height / 2 - 40, Graphics.FONT_SMALL, 
                        _stepsLabel, Graphics.TEXT_JUSTIFY_CENTER);
         }
         
-        // Draw progress info
+        // התקדמות
         if (_progressLabel != null) {
-            dc.drawText(centerX, height / 2 + 10, Graphics.FONT_TINY, 
+            dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(centerX, height / 2, Graphics.FONT_TINY, 
                        _progressLabel, Graphics.TEXT_JUSTIFY_CENTER);
         }
         
-        // Draw status message
+        // מידע למידה
+        if (_learningLabel != null) {
+            dc.setColor(Graphics.COLOR_BLUE, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(centerX, height / 2 + 30, Graphics.FONT_XTINY, 
+                       _learningLabel, Graphics.TEXT_JUSTIFY_CENTER);
+        }
+        
+        // סטטוס
         var statusMsg = getStatusMessage();
         if (statusMsg != null) {
             var statusColor = statusMsg[:color];
             dc.setColor(statusColor, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(centerX, height * 3 / 4, Graphics.FONT_TINY, 
+            dc.drawText(centerX, height * 5 / 6, Graphics.FONT_SMALL, 
                        statusMsg[:text], Graphics.TEXT_JUSTIFY_CENTER);
         }
-    }
-
-    // Called when this View is removed from the screen
-    function onHide() as Void {
     }
 
     private function updateLabels() as Void {
@@ -73,6 +92,7 @@ class steps_reminderView extends WatchUi.View {
         if (activityInfo == null) {
             _stepsLabel = WatchUi.loadResource(Rez.Strings.NoData);
             _progressLabel = "";
+            _learningLabel = "";
             return;
         }
 
@@ -82,17 +102,15 @@ class steps_reminderView extends WatchUi.View {
         if (currentSteps == null || stepGoal == null) {
             _stepsLabel = WatchUi.loadResource(Rez.Strings.NoData);
             _progressLabel = "";
+            _learningLabel = "";
             return;
         }
 
-        // Format steps label
         _stepsLabel = Lang.format(WatchUi.loadResource(Rez.Strings.StepsFormat), 
                                  [currentSteps, stepGoal]);
         
-        // Calculate progress
         var stepsPercent = ((currentSteps.toFloat() / stepGoal.toFloat()) * 100).toNumber();
         
-        // Get time progress
         var now = Time.now();
         var timeInfo = Time.Gregorian.info(now, Time.FORMAT_SHORT);
         var currentMinutes = timeInfo.hour * 60 + timeInfo.min;
@@ -101,6 +119,19 @@ class steps_reminderView extends WatchUi.View {
         
         _progressLabel = Lang.format(WatchUi.loadResource(Rez.Strings.ProgressFormat), 
                                     [stepsPercent, timePercent]);
+        
+        // הצגת מידע על למידה
+        var app = Application.getApp() as steps_reminderApp;
+        var expectedProgress = app.getExpectedProgressForNow();
+        var diff = stepsPercent - expectedProgress;
+        
+        if (diff >= 0) {
+            _learningLabel = Lang.format("Expected: $1$% (+$2$%)", 
+                                        [expectedProgress.format("%.0f"), diff.format("%.0f")]);
+        } else {
+            _learningLabel = Lang.format("Expected: $1$% ($2$%)", 
+                                        [expectedProgress.format("%.0f"), diff.format("%.0f")]);
+        }
     }
 
     private function getStatusMessage() as Dictionary? {
@@ -117,14 +148,13 @@ class steps_reminderView extends WatchUi.View {
             return null;
         }
 
-        // Get current time info
         var now = Time.now();
         var timeInfo = Time.Gregorian.info(now, Time.FORMAT_SHORT);
         var currentMinutes = timeInfo.hour * 60 + timeInfo.min;
         var totalMinutesInDay = 24 * 60;
         var dayProgress = currentMinutes.toFloat() / totalMinutesInDay.toFloat();
+        var stepsPercent = (currentSteps.toFloat() / stepGoal.toFloat()) * 100;
 
-        // Get user settings
         var props = Application.Properties;
         var usePercent = props.getValue("usePercent");
         var timeThreshold = props.getValue("timeThreshold");
@@ -137,9 +167,10 @@ class steps_reminderView extends WatchUi.View {
         var isBehind = false;
 
         if (usePercent) {
-            var timePercent = dayProgress * 100;
-            var stepsPercent = (currentSteps.toFloat() / stepGoal.toFloat()) * 100;
-            isBehind = (timePercent >= timeThreshold && stepsPercent < stepsThreshold);
+            // שימוש בלמידה
+            var app = Application.getApp() as steps_reminderApp;
+            var expectedProgress = app.getExpectedProgressForNow();
+            isBehind = (stepsPercent < expectedProgress - 5);
         } else {
             isBehind = (currentMinutes >= timeThreshold && currentSteps < stepsThreshold);
         }
