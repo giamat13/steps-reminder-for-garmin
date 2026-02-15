@@ -1,6 +1,9 @@
 # Garmin Connect IQ Build Files
 bin/
 .vscode/
+gen/
+internal-mir/
+mir/
 *.prg
 *.iq
 
@@ -15,3 +18,8 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+
+
+stepsreminderforgarmin-settings.json
+stepsreminderforgarmin.prg.debug.xml
