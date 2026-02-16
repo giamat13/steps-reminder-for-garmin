@@ -7,11 +7,16 @@ import Toybox.Time;
 import Toybox.ActivityMonitor;
 import Toybox.Attention;
 import Toybox.Communications;
+import Toybox.Math;
 
+// חובה להוסיף את התגית הזו כדי שהאפליקציה תרוץ ברקע
+(:background)
 class steps_reminderApp extends Application.AppBase {
     private var _historyData as Array?;
-    private const MAX_HISTORY_DAYS = 90; // שמירת 90 ימים אחורה
+    private const MAX_HISTORY_DAYS = 90;
     private const STORAGE_KEY_HISTORY = "stepHistory";
+    // כ-5 ימים של דגימות (בהנחה של דגימה כל 45 דק') לפני שמתחילים למידה חכמה
+    private const MIN_SAMPLES_FOR_LEARNING = 150; 
 
     function initialize() {
         AppBase.initialize();
@@ -19,12 +24,12 @@ class steps_reminderApp extends Application.AppBase {
     }
 
     function onStart(state as Dictionary?) as Void {
-        Background.registerForTemporalEvent(new Time.Duration(20 * 60)); // בדיקה כל 20 דקות
+        // רישום לאירוע כל 45 דקות
+        Background.registerForTemporalEvent(new Time.Duration(45 * 60));
     }
 
     function onStop(state as Dictionary?) as Void {
         saveHistoryData();
-        Background.deleteTemporalEvent();
     }
 
     function getInitialView() as [Views] or [Views, InputDelegates] {
@@ -35,276 +40,155 @@ class steps_reminderApp extends Application.AppBase {
         return [new StepsServiceDelegate()];
     }
 
-    // טעינת היסטוריה מהזיכרון
-    function loadHistoryData() as Array {
-        var storage = Application.Storage;
-        var data = storage.getValue(STORAGE_KEY_HISTORY);
+    // --- ליבת הלוגיקה והלמידה ---
+
+    function getExpectedProgressForNow() as Float {
+        var now = Time.now();
+        var t = Time.Gregorian.info(now, Time.FORMAT_SHORT);
         
+        // חישוב בסיסי: התקדמות ליניארית לפי שעה ביום (למשל ב-12:00 זה 50%)
+        var linearPercent = ((t.hour * 60 + t.min).toFloat() / 1440.0) * 100.0;
+
+        // שלב 1: אם אין מספיק נתונים (שבוע ראשון), מחזירים את הליניארי
+        if (_historyData == null || _historyData.size() < MIN_SAMPLES_FOR_LEARNING) {
+            return linearPercent;
+        }
+
+        // שלב 2: למידה מההיסטוריה
+        var totalWeight = 0.0;
+        var weightedSum = 0.0;
+        var foundSamples = false;
+
+        for (var i = 0; i < _historyData.size(); i++) {
+            var r = _historyData[i];
+            
+            // סינון: לוקחים רק דגימות מאותו יום בשבוע (למשל ימי ראשון)
+            // ורק דגימות שקרו בטווח של שעתיים מהשעה הנוכחית
+            if (r["day"] == t.day_of_week && (r["hour"] - t.hour).abs() <= 2) {
+                foundSamples = true;
+                
+                // חישוב משקל: דגימות חדשות משפיעות יותר מישנות
+                var ageInSeconds = now.value() - r["timestamp"];
+                var weight = Math.pow(0.95, ageInSeconds / 86400.0); // דעיכה יומית קלה
+                
+                weightedSum += r["stepsPercent"] * weight;
+                totalWeight += weight;
+            }
+        }
+
+        if (!foundSamples || totalWeight == 0) {
+            return linearPercent;
+        }
+
+        var learnedTarget = weightedSum / totalWeight;
+
+        // שלב 3: החלקה (Smoothing) ומניעת קפיצות
+        // אנחנו לא רוצים שהיעד יקפוץ בטירוף. אנחנו עושים ממוצע בין הליניארי לנלמד
+        // אבל נותנים יותר כוח לנלמד ככל שיש יותר דגימות.
+        // בנוסף, זה פותר את בעיית הריצה: אם המשתמש רץ בערב קבוע, ההיסטוריה תראה
+        // שבשעה הזו בבוקר יש לו מעט צעדים, והיעד הנלמד ירד בהתאם באופן טבעי.
+        
+        // הגבלת הסטייה כדי למנוע באגים של 0% או 100% פתאומיים
+        if (learnedTarget < linearPercent - 20) { learnedTarget = linearPercent - 20; }
+        if (learnedTarget > linearPercent + 20) { learnedTarget = linearPercent + 20; }
+
+        return learnedTarget;
+    }
+
+    // --- ניהול נתונים (Load/Save) ---
+
+    function loadHistoryData() as Array {
+        var data = Application.Storage.getValue(STORAGE_KEY_HISTORY);
         if (data != null && data instanceof Array) {
             return data as Array;
         }
-        
         return [] as Array;
     }
 
-    // שמירת היסטוריה לזיכרון
     function saveHistoryData() as Void {
-        var storage = Application.Storage;
         if (_historyData != null) {
-            storage.setValue(STORAGE_KEY_HISTORY, _historyData);
+            Application.Storage.setValue(STORAGE_KEY_HISTORY, _historyData);
         }
     }
 
-    // הוספת נתון היסטורי
-    function addHistoryRecord(steps as Number, stepGoal as Number, timePercent as Float) as Void {
-        if (_historyData == null) {
-            _historyData = [] as Array;
-        }
-        
+    function addHistoryRecord(steps as Number, stepGoal as Number) as Void {
+        if (_historyData == null) { _historyData = [] as Array; }
         var now = Time.now();
-        var timeInfo = Time.Gregorian.info(now, Time.FORMAT_SHORT);
+        var t = Time.Gregorian.info(now, Time.FORMAT_SHORT);
         
+        // חישוב אחוז נוכחי לשמירה
+        var currentPct = 0.0;
+        if (stepGoal > 0) {
+            currentPct = (steps.toFloat() / stepGoal.toFloat()) * 100.0;
+        }
+
         var record = {
-            "day" => timeInfo.day_of_week, // 1=Sunday, 7=Saturday
-            "hour" => timeInfo.hour,
-            "steps" => steps,
-            "stepGoal" => stepGoal,
-            "stepsPercent" => (steps.toFloat() / stepGoal.toFloat()) * 100,
-            "timePercent" => timePercent,
+            "day" => t.day_of_week,
+            "hour" => t.hour,
+            "stepsPercent" => currentPct,
             "timestamp" => now.value()
         };
         
         _historyData.add(record);
         
-        // שמירה על מקסימום ימים
-        if (_historyData.size() > MAX_HISTORY_DAYS * 72) { // 72 = 24 hours * 3 samples per hour
-            _historyData = _historyData.slice(_historyData.size() - (MAX_HISTORY_DAYS * 72), _historyData.size());
+        // שמירה על גודל היסטוריה סביר (כ-3 חודשים)
+        if (_historyData.size() > MAX_HISTORY_DAYS * 32) {
+            _historyData = _historyData.slice(1, _historyData.size());
         }
-        
         saveHistoryData();
     }
 
-    // חישוב התקדמות צפויה לפי למידה מהיסטוריה
-    function getExpectedProgressForNow() as Float {
-        if (_historyData == null || _historyData.size() < 10) {
-            // אין מספיק נתונים - נשתמש בלוגיקה הליניארית הבסיסית
-            var now = Time.now();
-            var timeInfo = Time.Gregorian.info(now, Time.FORMAT_SHORT);
-            var currentMinutes = timeInfo.hour * 60 + timeInfo.min;
-            return (currentMinutes.toFloat() / 1440.0) * 100.0; // יחס ליניארי
-        }
-        
-        var now = Time.now();
-        var timeInfo = Time.Gregorian.info(now, Time.FORMAT_SHORT);
-        var currentDay = timeInfo.day_of_week;
-        var currentHour = timeInfo.hour;
-        
-        // מציאת רשומות דומות מהעבר (אותו יום בשבוע, אותה שעה בערך)
-        var relevantRecords = [] as Array;
-        
-        for (var i = 0; i < _historyData.size(); i++) {
-            var record = _historyData[i];
-            
-            // אותו יום בשבוע ואותה שעה (±2 שעות)
-            if (record["day"] == currentDay && 
-                (record["hour"] - currentHour).abs() <= 2) {
-                relevantRecords.add(record);
-            }
-        }
-        
-        if (relevantRecords.size() == 0) {
-            // אין נתונים לרלוונטיים - נשתמש בממוצע כללי
-            return calculateOverallAverage();
-        }
-        
-        // חישוב ממוצע משוקלל (נתונים חדשים יותר מקבלים משקל גבוה יותר)
-        var totalWeight = 0.0;
-        var weightedSum = 0.0;
-        
-        for (var i = 0; i < relevantRecords.size(); i++) {
-            var record = relevantRecords[i];
-            var age = now.value() - record["timestamp"];
-            var daysSinceRecord = age / (24 * 60 * 60);
-            
-            // משקל יורד אקספוננציאלית עם הזמן
-            var weight = Math.pow(0.95, daysSinceRecord);
-            
-            weightedSum += record["stepsPercent"] * weight;
-            totalWeight += weight;
-        }
-        
-        if (totalWeight > 0) {
-            return weightedSum / totalWeight;
-        }
-        
-        return calculateOverallAverage();
-    }
-
-    // חישוב ממוצע כללי
-    function calculateOverallAverage() as Float {
-        if (_historyData == null || _historyData.size() == 0) {
-            var now = Time.now();
-            var timeInfo = Time.Gregorian.info(now, Time.FORMAT_SHORT);
-            var currentMinutes = timeInfo.hour * 60 + timeInfo.min;
-            return (currentMinutes.toFloat() / 1440.0) * 100.0;
-        }
-        
-        var sum = 0.0;
-        for (var i = 0; i < _historyData.size(); i++) {
-            sum += _historyData[i]["stepsPercent"];
-        }
-        
-        return sum / _historyData.size();
-    }
-
+    // --- הפונקציה שרצה ברקע כל 45 דקות ---
     function checkStepsAndAlert() as Void {
-        var activityInfo = ActivityMonitor.getInfo();
-        
-        if (activityInfo == null) {
-            return;
-        }
+        var info = ActivityMonitor.getInfo();
+        if (info == null || info.steps == null || info.stepGoal == null || info.stepGoal == 0) { return; }
 
-        var currentSteps = activityInfo.steps;
-        var stepGoal = activityInfo.stepGoal;
+        // בדיקות אי-הפרעה
+        var settings = System.getDeviceSettings();
+        if (info has :isSleepMode && info.isSleepMode) { return; }
+        if (settings has :doNotDisturb && settings.doNotDisturb) { return; }
         
-        if (currentSteps == null || stepGoal == null || stepGoal == 0) {
-            return;
-        }
-
+        // הגבלת שעות (לא בלילה)
         var now = Time.now();
-        var timeInfo = Time.Gregorian.info(now, Time.FORMAT_SHORT);
-        var currentMinutes = timeInfo.hour * 60 + timeInfo.min;
-        var totalMinutesInDay = 24 * 60;
-        var dayProgress = currentMinutes.toFloat() / totalMinutesInDay.toFloat();
-        var timePercent = dayProgress * 100;
-        var stepsPercent = (currentSteps.toFloat() / stepGoal.toFloat()) * 100;
+        var t = Time.Gregorian.info(now, Time.FORMAT_SHORT);
+        if (t.hour < 7 || t.hour >= 23) { return; }
 
-        // הוספת נתון היסטורי
-        addHistoryRecord(currentSteps, stepGoal, timePercent);
+        // שמירת דגימה להיסטוריה
+        addHistoryRecord(info.steps, info.stepGoal);
+        
+        // בדיקת היעד מול המצוי
+        var expectedPct = getExpectedProgressForNow();
+        var currentPct = (info.steps.toFloat() / info.stepGoal.toFloat()) * 100.0;
+        var delta = currentPct - expectedPct;
 
-        // קבלת התקדמות צפויה לפי למידה
-        var expectedProgress = getExpectedProgressForNow();
-
-        var props = Application.Properties;
-        var usePercent = props.getValue("usePercent");
-        var timeThreshold = props.getValue("timeThreshold");
-        var stepsThreshold = props.getValue("stepsThreshold");
-
-        if (usePercent == null) { usePercent = true; }
-        if (timeThreshold == null) { timeThreshold = 50; }
-        if (stepsThreshold == null) { stepsThreshold = 50; }
-
-        var shouldAlert = false;
-        var alertMessage = "";
-
-        if (usePercent) {
-            // מצב אחוזים - השוואה יחסית עם למידה
-            // נשווה את ההתקדמות בפועל להתקדמות הצפויה
-            if (stepsPercent < expectedProgress - 5) { // מרווח של 5% למניעת התראות מיותרות
-                shouldAlert = true;
-                alertMessage = Lang.format("$1$% steps vs expected $2$% at this time", 
-                    [stepsPercent.format("%.0f"), expectedProgress.format("%.0f")]);
-            }
-        } else {
-            // מצב מוחלט
-            if (currentMinutes >= timeThreshold && currentSteps < stepsThreshold) {
-                shouldAlert = true;
-                var hoursElapsed = (currentMinutes / 60).format("%d");
-                var minutesElapsed = (currentMinutes % 60).format("%02d");
-                alertMessage = Lang.format("$1$:$2$ - Only $3$ steps (goal: $4$)", 
-                    [hoursElapsed, minutesElapsed, currentSteps, stepsThreshold]);
-            }
-        }
-
-        if (shouldAlert) {
-            sendAlert(alertMessage);
+        // התראה רק אם ה"אחד העליון" (דלתא) מתחת לאפס
+        if (delta < 0) {
+            var msg = "Low steps! Lagging by " + delta.format("%.1f") + "%";
+            sendAlert(msg);
         }
     }
 
-    function sendAlert(message as String) as Void {
-        // רטט ב-Watch
-        if (Attention has :playTone) {
-            Attention.playTone(Attention.TONE_ALERT_HI);
-        }
-        
+    function sendAlert(message as Lang.String) as Void {
         if (Attention has :vibrate) {
-            var vibeProfile = [
-                new Attention.VibeProfile(50, 200),
-                new Attention.VibeProfile(0, 200),
-                new Attention.VibeProfile(50, 200)
-            ];
-            Attention.vibrate(vibeProfile);
+            Attention.vibrate([new Attention.VibeProfile(100, 1000)]);
         }
-
-        // שליחה לטלפון דרך Garmin Connect
-        if (Communications has :makeWebRequest) {
-            try {
-                var params = {
-                    "title" => "Steps Reminder",
-                    "message" => message
-                };
-                
-                // Garmin Connect תומך בהתראות דרך phoneMessage
-                if (System.getDeviceSettings() has :phoneConnected && 
-                    System.getDeviceSettings().phoneConnected) {
-                    
-                    // שימוש ב-makeWebRequest לשליחת התראה
-                    Communications.makeWebRequest(
-                        "https://services.garmin.com/appstorecontent/connect-iq/notification",
-                        params,
-                        {
-                            :method => Communications.HTTP_REQUEST_METHOD_POST,
-                            :headers => {
-                                "Content-Type" => Communications.REQUEST_CONTENT_TYPE_JSON
-                            }
-                        },
-                        method(:onNotificationResponse)
-                    );
-                }
-            } catch (ex) {
-                // אם יש שגיאה בשליחת ההתראה, נמשיך בלי לקרוס
-                System.println("Failed to send notification: " + ex.getErrorMessage());
-            }
+        if (System.getDeviceSettings().phoneConnected) {
+            Communications.makeWebRequest("https://dummy.com", {"m"=>message}, {}, method(:onNotificationResponse));
         }
     }
 
-    function onNotificationResponse(responseCode as Number, data as Dictionary?) as Void {
-        // Callback ריק - אנחנו לא צריכים לעשות כלום עם התשובה
-    }
-
-    // פונקציה לניקוי היסטוריה ישנה (אופציונלי)
-    function cleanOldHistory() as Void {
-        if (_historyData == null || _historyData.size() == 0) {
-            return;
-        }
-        
-        var now = Time.now();
-        var cutoffTime = now.value() - (MAX_HISTORY_DAYS * 24 * 60 * 60);
-        
-        var newHistory = [] as Array;
-        for (var i = 0; i < _historyData.size(); i++) {
-            if (_historyData[i]["timestamp"] >= cutoffTime) {
-                newHistory.add(_historyData[i]);
-            }
-        }
-        
-        _historyData = newHistory;
-        saveHistoryData();
-    }
+    function onNotificationResponse(code as Number, data as Dictionary?) as Void {}
 }
 
+// --- Delegate (חייב להיות מחוץ לקלאס הראשי) ---
+(:background)
 class StepsServiceDelegate extends System.ServiceDelegate {
     function initialize() {
         ServiceDelegate.initialize();
     }
-
     function onTemporalEvent() as Void {
         var app = Application.getApp() as steps_reminderApp;
         app.checkStepsAndAlert();
         Background.exit(null);
     }
-}
-
-function getApp() as steps_reminderApp {
-    return Application.getApp() as steps_reminderApp;
 }

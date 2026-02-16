@@ -1,190 +1,114 @@
 import Toybox.Graphics;
 import Toybox.WatchUi;
 import Toybox.ActivityMonitor;
-import Toybox.System;
-import Toybox.Time;
-import Toybox.Lang;
-import Toybox.Timer;
 import Toybox.Application;
+import Toybox.Timer;
+import Toybox.Lang;
 
 class steps_reminderView extends WatchUi.View {
-    private var _stepsLabel as String?;
-    private var _progressLabel as String?;
-    private var _learningLabel as String?;
+    // משתנים לתצוגה - מוגדרים כ-Nullable כדי למנוע שגיאות אתחול
+    private var _line1 as Lang.String?;
+    private var _line2 as Lang.String?;
+    private var _deltaLabel as Lang.String?;
+    private var _statusLabel as Lang.String?;
+    private var _deltaValue as Float = 0.0;
     private var _updateTimer as Timer.Timer?;
 
     function initialize() {
         View.initialize();
+        _line1 = "";
+        _line2 = "";
+        _deltaLabel = "--";
+        _statusLabel = "";
         _updateTimer = new Timer.Timer();
     }
 
-    function onLayout(dc as Dc) as Void {
-    }
-
     function onShow() as Void {
-        updateLabels();
-        
+        // רענון המסך כל 30 שניות כשהאפליקציה פתוחה
         if (_updateTimer != null) {
-            _updateTimer.start(method(:timerCallback), 10000, true);
+            _updateTimer.start(method(:requestUpdate), 30000, true);
         }
     }
 
     function onHide() as Void {
-        if (_updateTimer != null) {
-            _updateTimer.stop();
-        }
+        if (_updateTimer != null) { _updateTimer.stop(); }
     }
 
-    function timerCallback() as Void {
+    // פונקציית עזר לטיימר
+    function requestUpdate() as Void {
         WatchUi.requestUpdate();
     }
 
-    function onUpdate(dc as Dc) as Void {
-        updateLabels();
+    function updateLabels() as Void {
+        var info = ActivityMonitor.getInfo();
+        var app = Application.getApp() as steps_reminderApp;
         
+        if (info != null && info.steps != null && info.stepGoal != null && info.stepGoal > 0) {
+            
+            // שורה 1: צעדים / יעד
+            _line1 = info.steps.toString() + " / " + info.stepGoal.toString();
+            
+            // חישובים
+            var currentPct = (info.steps.toFloat() / info.stepGoal.toFloat()) * 100.0;
+            var expectedPct = app.getExpectedProgressForNow();
+            
+            // שורה 2: אחוז נוכחי | אחוז יעד (לפי למידה)
+            _line2 = currentPct.format("%.1f") + "% | " + expectedPct.format("%.1f") + "%";
+            
+            // חישוב הדלתא ("האחד העליון")
+            _deltaValue = currentPct - expectedPct;
+            var sign = (_deltaValue >= 0) ? "+" : "";
+            _deltaLabel = sign + _deltaValue.format("%.1f") + "%";
+            
+            // סטטוס טקסטואלי
+            if (_deltaValue >= 0) {
+                _statusLabel = "On Track";
+            } else {
+                _statusLabel = "Step now";
+            }
+        }
+    }
+
+    function onUpdate(dc as Graphics.Dc) as Void {
+        // קודם מחשבים את המספרים
+        updateLabels();
+
+        // ניקוי מסך
         dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_BLACK);
         dc.clear();
         
-        var width = dc.getWidth();
-        var height = dc.getHeight();
-        var centerX = width / 2;
+        var cx = dc.getWidth() / 2;
+        var cy = dc.getHeight() / 2;
         
-        // כותרת
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(centerX, height / 6, Graphics.FONT_MEDIUM, 
-                   WatchUi.loadResource(Rez.Strings.AppName), 
-                   Graphics.TEXT_JUSTIFY_CENTER);
+        // כותרת קטנה
+        dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(cx, cy - 80, Graphics.FONT_XTINY, "Steps Monitor", Graphics.TEXT_JUSTIFY_CENTER);
         
-        // מידע על צעדים
-        if (_stepsLabel != null) {
+        // שורה 1 (צעדים/יעד)
+        if (_line1 != null) {
             dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(centerX, height / 2 - 40, Graphics.FONT_SMALL, 
-                       _stepsLabel, Graphics.TEXT_JUSTIFY_CENTER);
+            dc.drawText(cx, cy - 55, Graphics.FONT_SMALL, _line1, Graphics.TEXT_JUSTIFY_CENTER);
         }
-        
-        // התקדמות
-        if (_progressLabel != null) {
+
+        // שורה 2 (אחוזים)
+        if (_line2 != null) {
             dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(centerX, height / 2, Graphics.FONT_TINY, 
-                       _progressLabel, Graphics.TEXT_JUSTIFY_CENTER);
+            dc.drawText(cx, cy - 30, Graphics.FONT_XTINY, _line2, Graphics.TEXT_JUSTIFY_CENTER);
         }
         
-        // מידע למידה
-        if (_learningLabel != null) {
-            dc.setColor(Graphics.COLOR_BLUE, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(centerX, height / 2 + 30, Graphics.FONT_XTINY, 
-                       _learningLabel, Graphics.TEXT_JUSTIFY_CENTER);
+        // הדלתא ("האחד העליון") - בגדול ובצבע
+        if (_deltaLabel != null) {
+            // ירוק אם חיובי (או אפס), אדום אם שלילי
+            var color = (_deltaValue >= 0) ? Graphics.COLOR_GREEN : Graphics.COLOR_RED;
+            dc.setColor(color, Graphics.COLOR_TRANSPARENT);
+            // שימוש בפונט גדול למספר המרכזי
+            dc.drawText(cx, cy + 5, Graphics.FONT_NUMBER_MEDIUM, _deltaLabel, Graphics.TEXT_JUSTIFY_CENTER);
         }
         
-        // סטטוס
-        var statusMsg = getStatusMessage();
-        if (statusMsg != null) {
-            var statusColor = statusMsg[:color];
-            dc.setColor(statusColor, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(centerX, height * 5 / 6, Graphics.FONT_SMALL, 
-                       statusMsg[:text], Graphics.TEXT_JUSTIFY_CENTER);
-        }
-    }
-
-    private function updateLabels() as Void {
-        var activityInfo = ActivityMonitor.getInfo();
-        
-        if (activityInfo == null) {
-            _stepsLabel = WatchUi.loadResource(Rez.Strings.NoData);
-            _progressLabel = "";
-            _learningLabel = "";
-            return;
-        }
-
-        var currentSteps = activityInfo.steps;
-        var stepGoal = activityInfo.stepGoal;
-        
-        if (currentSteps == null || stepGoal == null) {
-            _stepsLabel = WatchUi.loadResource(Rez.Strings.NoData);
-            _progressLabel = "";
-            _learningLabel = "";
-            return;
-        }
-
-        _stepsLabel = Lang.format(WatchUi.loadResource(Rez.Strings.StepsFormat), 
-                                 [currentSteps, stepGoal]);
-        
-        var stepsPercent = ((currentSteps.toFloat() / stepGoal.toFloat()) * 100).toNumber();
-        
-        var now = Time.now();
-        var timeInfo = Time.Gregorian.info(now, Time.FORMAT_SHORT);
-        var currentMinutes = timeInfo.hour * 60 + timeInfo.min;
-        var totalMinutesInDay = 24 * 60;
-        var timePercent = ((currentMinutes.toFloat() / totalMinutesInDay.toFloat()) * 100).toNumber();
-        
-        _progressLabel = Lang.format(WatchUi.loadResource(Rez.Strings.ProgressFormat), 
-                                    [stepsPercent, timePercent]);
-        
-        // הצגת מידע על למידה
-        var app = Application.getApp() as steps_reminderApp;
-        var expectedProgress = app.getExpectedProgressForNow();
-        var diff = stepsPercent - expectedProgress;
-        
-        if (diff >= 0) {
-            _learningLabel = Lang.format("Expected: $1$% (+$2$%)", 
-                                        [expectedProgress.format("%.0f"), diff.format("%.0f")]);
-        } else {
-            _learningLabel = Lang.format("Expected: $1$% ($2$%)", 
-                                        [expectedProgress.format("%.0f"), diff.format("%.0f")]);
-        }
-    }
-
-    private function getStatusMessage() as Dictionary? {
-        var activityInfo = ActivityMonitor.getInfo();
-        
-        if (activityInfo == null) {
-            return null;
-        }
-
-        var currentSteps = activityInfo.steps;
-        var stepGoal = activityInfo.stepGoal;
-        
-        if (currentSteps == null || stepGoal == null || stepGoal == 0) {
-            return null;
-        }
-
-        var now = Time.now();
-        var timeInfo = Time.Gregorian.info(now, Time.FORMAT_SHORT);
-        var currentMinutes = timeInfo.hour * 60 + timeInfo.min;
-        var totalMinutesInDay = 24 * 60;
-        var dayProgress = currentMinutes.toFloat() / totalMinutesInDay.toFloat();
-        var stepsPercent = (currentSteps.toFloat() / stepGoal.toFloat()) * 100;
-
-        var props = Application.Properties;
-        var usePercent = props.getValue("usePercent");
-        var timeThreshold = props.getValue("timeThreshold");
-        var stepsThreshold = props.getValue("stepsThreshold");
-
-        if (usePercent == null) { usePercent = true; }
-        if (timeThreshold == null) { timeThreshold = 50; }
-        if (stepsThreshold == null) { stepsThreshold = 50; }
-
-        var isBehind = false;
-
-        if (usePercent) {
-            // שימוש בלמידה
-            var app = Application.getApp() as steps_reminderApp;
-            var expectedProgress = app.getExpectedProgressForNow();
-            isBehind = (stepsPercent < expectedProgress - 5);
-        } else {
-            isBehind = (currentMinutes >= timeThreshold && currentSteps < stepsThreshold);
-        }
-
-        if (isBehind) {
-            return {
-                :text => WatchUi.loadResource(Rez.Strings.StatusBehind),
-                :color => Graphics.COLOR_RED
-            };
-        } else {
-            return {
-                :text => WatchUi.loadResource(Rez.Strings.StatusOnTrack),
-                :color => Graphics.COLOR_GREEN
-            };
+        // סטטוס (On Track / Step Now)
+        if (_statusLabel != null) {
+            dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(cx, cy + 55, Graphics.FONT_MEDIUM, _statusLabel, Graphics.TEXT_JUSTIFY_CENTER);
         }
     }
 }
