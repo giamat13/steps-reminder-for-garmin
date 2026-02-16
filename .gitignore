@@ -23,3 +23,8 @@ npm-debug.log*
 
 stepsreminderforgarmin-settings.json
 stepsreminderforgarmin.prg.debug.xml
+
+
+node_modules/
+package-lock.json
+package.json
