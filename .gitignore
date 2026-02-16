@@ -28,3 +28,5 @@ stepsreminderforgarmin.prg.debug.xml
 node_modules/
 package-lock.json
 package.json
+
+developer_key
