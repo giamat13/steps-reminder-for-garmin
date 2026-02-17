@@ -6,7 +6,6 @@ import Toybox.Timer;
 import Toybox.Lang;
 
 class steps_reminderView extends WatchUi.View {
-    // משתנים לתצוגה - מוגדרים כ-Nullable כדי למנוע שגיאות אתחול
     private var _line1 as Lang.String?;
     private var _line2 as Lang.String?;
     private var _deltaLabel as Lang.String?;
@@ -24,7 +23,6 @@ class steps_reminderView extends WatchUi.View {
     }
 
     function onShow() as Void {
-        // רענון המסך כל 30 שניות כשהאפליקציה פתוחה
         if (_updateTimer != null) {
             _updateTimer.start(method(:requestUpdate), 30000, true);
         }
@@ -34,7 +32,6 @@ class steps_reminderView extends WatchUi.View {
         if (_updateTimer != null) { _updateTimer.stop(); }
     }
 
-    // פונקציית עזר לטיימר
     function requestUpdate() as Void {
         WatchUi.requestUpdate();
     }
@@ -44,23 +41,13 @@ class steps_reminderView extends WatchUi.View {
         var app = Application.getApp() as steps_reminderApp;
         
         if (info != null && info.steps != null && info.stepGoal != null && info.stepGoal > 0) {
-            
-            // שורה 1: צעדים / יעד
             _line1 = info.steps.toString() + " / " + info.stepGoal.toString();
-            
-            // חישובים
             var currentPct = (info.steps.toFloat() / info.stepGoal.toFloat()) * 100.0;
             var expectedPct = app.getExpectedProgressForNow();
-            
-            // שורה 2: אחוז נוכחי | אחוז יעד (לפי למידה)
             _line2 = currentPct.format("%.1f") + "% | " + expectedPct.format("%.1f") + "%";
-            
-            // חישוב הדלתא ("האחד העליון")
             _deltaValue = currentPct - expectedPct;
             var sign = (_deltaValue >= 0) ? "+" : "";
             _deltaLabel = sign + _deltaValue.format("%.1f") + "%";
-            
-            // סטטוס טקסטואלי
             if (_deltaValue >= 0) {
                 _statusLabel = "On Track";
             } else {
@@ -70,45 +57,43 @@ class steps_reminderView extends WatchUi.View {
     }
 
     function onUpdate(dc as Graphics.Dc) as Void {
-        // קודם מחשבים את המספרים
         updateLabels();
-
-        // ניקוי מסך
         dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_BLACK);
         dc.clear();
         
-        var cx = dc.getWidth() / 2;
-        var cy = dc.getHeight() / 2;
-        
-        // כותרת קטנה
+        var w = dc.getWidth();
+        var h = dc.getHeight();
+        var cx = w / 2;
+
+        // שימוש במיקומים יחסיים למניעת חפיפה
+        // כותרת - 20% מגובה המסך
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(cx, cy - 80, Graphics.FONT_XTINY, "Steps Monitor", Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(cx, h * 0.18, Graphics.FONT_XTINY, "Steps Monitor", Graphics.TEXT_JUSTIFY_CENTER);
         
-        // שורה 1 (צעדים/יעד)
+        // שורה 1 (צעדים) - 32% מגובה המסך
         if (_line1 != null) {
             dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(cx, cy - 55, Graphics.FONT_SMALL, _line1, Graphics.TEXT_JUSTIFY_CENTER);
+            dc.drawText(cx, h * 0.30, Graphics.FONT_SMALL, _line1, Graphics.TEXT_JUSTIFY_CENTER);
         }
 
-        // שורה 2 (אחוזים)
+        // שורה 2 (אחוזים קטנים) - 42% מגובה המסך
         if (_line2 != null) {
             dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(cx, cy - 30, Graphics.FONT_XTINY, _line2, Graphics.TEXT_JUSTIFY_CENTER);
+            dc.drawText(cx, h * 0.43, Graphics.FONT_XTINY, _line2, Graphics.TEXT_JUSTIFY_CENTER);
         }
         
-        // הדלתא ("האחד העליון") - בגדול ובצבע
+        // הדלתא המרכזית - 55% מגובה המסך
         if (_deltaLabel != null) {
-            // ירוק אם חיובי (או אפס), אדום אם שלילי
             var color = (_deltaValue >= 0) ? Graphics.COLOR_GREEN : Graphics.COLOR_RED;
             dc.setColor(color, Graphics.COLOR_TRANSPARENT);
-            // שימוש בפונט גדול למספר המרכזי
-            dc.drawText(cx, cy + 5, Graphics.FONT_NUMBER_MEDIUM, _deltaLabel, Graphics.TEXT_JUSTIFY_CENTER);
+            // החלפה לפונט LARGE במקום NUMBER - הרבה יותר נקי ב-AMOLED
+            dc.drawText(cx, h * 0.55, Graphics.FONT_LARGE, _deltaLabel, Graphics.TEXT_JUSTIFY_CENTER);
         }
         
-        // סטטוס (On Track / Step Now)
+        // סטטוס (Step Now) - 75% מגובה המסך
         if (_statusLabel != null) {
             dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(cx, cy + 55, Graphics.FONT_MEDIUM, _statusLabel, Graphics.TEXT_JUSTIFY_CENTER);
+            dc.drawText(cx, h * 0.78, Graphics.FONT_MEDIUM, _statusLabel, Graphics.TEXT_JUSTIFY_CENTER);
         }
     }
 }
