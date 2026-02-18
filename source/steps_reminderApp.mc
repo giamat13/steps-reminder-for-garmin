@@ -6,7 +6,6 @@ import Toybox.System;
 import Toybox.Time;
 import Toybox.ActivityMonitor;
 import Toybox.Attention;
-import Toybox.Communications;
 
 (:background)
 class steps_reminderApp extends Application.AppBase {
@@ -14,10 +13,11 @@ class steps_reminderApp extends Application.AppBase {
     private const STORAGE_KEY_HISTORY = "stepHistory";
     private const MIN_SAMPLES_FOR_LEARNING = 150;
     private const MAX_STORAGE_RECORDS = 600;
-
     enum { IDX_DAY = 0, IDX_HOUR = 1, IDX_PCT = 2, IDX_TS = 3 }
 
-    function initialize() { AppBase.initialize(); }
+    function initialize() { 
+        AppBase.initialize(); 
+    }
 
     function getInitialView() as [Views] or [Views, InputDelegates] {
         var data = Application.Storage.getValue(STORAGE_KEY_HISTORY);
@@ -38,7 +38,9 @@ class steps_reminderApp extends Application.AppBase {
         Background.registerForTemporalEvent(new Time.Duration(45 * 60));
     }
 
-    function onStop(state as Dictionary?) as Void { saveHistoryData(); }
+    function onStop(state as Dictionary?) as Void { 
+        saveHistoryData(); 
+    }
 
     function getServiceDelegate() as [System.ServiceDelegate] {
         return [new StepsServiceDelegate()];
@@ -50,7 +52,13 @@ class steps_reminderApp extends Application.AppBase {
         }
     }
 
+    // תיקון שורה 32: וידוא טעינת נתונים לפני חישוב
     function getExpectedProgressForNow() as Float {
+        if (_historyData == null) {
+            var data = Application.Storage.getValue(STORAGE_KEY_HISTORY);
+            _historyData = (data instanceof Array) ? data : [] as Array<Array>;
+        }
+
         var now = Time.now();
         var t = Time.Gregorian.info(now, Time.FORMAT_SHORT);
         
@@ -65,16 +73,14 @@ class steps_reminderApp extends Application.AppBase {
 
         var totalWeight = 0.0, weightedSum = 0.0;
         var nowVal = now.value();
-        var twoWeeks = 1209600; // 14 days in seconds
+        var twoWeeks = 1209600; 
 
         for (var i = 0; i < _historyData.size(); i++) {
             var r = _historyData[i];
             if (r[IDX_DAY] == t.day_of_week && (r[IDX_HOUR] - t.hour).abs() <= 2) {
-                // חישוב משקל ליניארי פשוט במקום Math.pow
                 var age = nowVal - r[IDX_TS];
                 var weight = 1.0 - (age.toFloat() / twoWeeks);
                 if (weight < 0.1) { weight = 0.1; }
-                
                 weightedSum += r[IDX_PCT] * weight;
                 totalWeight += weight;
             }
@@ -83,12 +89,12 @@ class steps_reminderApp extends Application.AppBase {
         if (totalWeight <= 0) { return linearPercent; }
         var learnedTarget = weightedSum / totalWeight;
         
-        // חסימת סטיות קיצוניות
         if (learnedTarget < linearPercent - 20) { return linearPercent - 20; }
         if (learnedTarget > linearPercent + 20) { return linearPercent + 20; }
         return learnedTarget;
     }
 
+    // תיקון שורות 32-33: טיפול בהתראות ברקע
     function checkStepsAndAlert() as Void {
         var info = ActivityMonitor.getInfo();
         if (info == null || info.steps == null || info.stepGoal == null || info.stepGoal == 0) { return; }
@@ -100,14 +106,32 @@ class steps_reminderApp extends Application.AppBase {
         
         var expectedPct = getExpectedProgressForNow();
         var currentPct = (info.steps.toFloat() / info.stepGoal.toFloat()) * 100.0;
-        
-        if (currentPct - expectedPct < -5.0) {
-            if (Attention has :vibrate) { Attention.vibrate([new Attention.VibeProfile(100, 500)]); }
+        var delta = currentPct - expectedPct;
+
+        // התראה אם אנחנו בסטטוס Step Now (דלתא שלילית)
+        if (delta < 0) {
+            if (Attention has :vibrate) {
+                // רטט ייחודי: פעימה ארוכה ושתיים קצרות כדי שתזהה שזה זה
+                var vibeProfile = [
+                    new Attention.VibeProfile(100, 1000),
+                    new Attention.VibeProfile(0, 200),
+                    new Attention.VibeProfile(100, 300),
+                    new Attention.VibeProfile(100, 300)
+                ];
+                Attention.vibrate(vibeProfile);
+            }
+            
+            if (Attention has :backlight) {
+                Attention.backlight(true);
+            }
         }
     }
 
     function addHistoryRecord(steps as Number, stepGoal as Number) as Void {
-        if (_historyData == null) { _historyData = [] as Array<Array>; }
+        if (_historyData == null) {
+            var data = Application.Storage.getValue(STORAGE_KEY_HISTORY);
+            _historyData = (data instanceof Array) ? data : [] as Array<Array>;
+        }
         var now = Time.now();
         var t = Time.Gregorian.info(now, Time.FORMAT_SHORT);
         var pct = (steps.toFloat() / stepGoal.toFloat()) * 100.0;
