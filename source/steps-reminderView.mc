@@ -47,12 +47,9 @@ class MigrationView extends WatchUi.View {
         var w = dc.getWidth(), h = dc.getHeight();
         dc.setColor(0xFFFFFF, -1);
         dc.drawText(w/2, h*0.3, Graphics.FONT_SMALL, "Updating Database", 1);
-        dc.drawText(w/2, h*0.45, Graphics.FONT_XTINY, "Please wait...", 1);
-        
         dc.drawRectangle(w*0.2, h*0.6, w*0.6, 12);
         dc.fillRectangle(w*0.2, h*0.6, (w*0.6) * (_progress/100.0), 12);
         dc.drawText(w/2, h*0.7, Graphics.FONT_XTINY, _progress + "%", 1);
-        dc.drawText(w/2, h*0.85, Graphics.FONT_XTINY, "Back to Exit", 1);
     }
 }
 
@@ -63,41 +60,49 @@ class MigrationDelegate extends WatchUi.BehaviorDelegate {
 
 // --- מסך ראשי (Main View) ---
 class steps_reminderView extends WatchUi.View {
-    private var _line1 = "", _line2 = "", _deltaLabel = "--", _statusLabel = "";
-    private var _deltaValue = 0.0;
-    private var _updateTimer = new Timer.Timer();
+    private var _displayData as Dictionary = {};
 
     function initialize() { View.initialize(); }
-    function onShow() { _updateTimer.start(method(:requestUpdate), 30000, true); }
-    function onHide() { _updateTimer.stop(); }
-    function requestUpdate() { WatchUi.requestUpdate(); }
 
-    function onUpdate(dc as Graphics.Dc) {
+    // פועל רק כשנכנסים למסך - חוסך סוללה משמעותית
+    function onShow() {
+        calculateData();
+    }
+
+    function calculateData() {
         var info = ActivityMonitor.getInfo();
         var app = Application.getApp() as steps_reminderApp;
         
         if (info != null && info.steps != null && info.stepGoal != null && info.stepGoal > 0) {
             var curPct = (info.steps.toFloat() / info.stepGoal.toFloat()) * 100.0;
             var expPct = app.getExpectedProgressForNow();
-            _line1 = info.steps.toString() + " / " + info.stepGoal.toString();
-            _line2 = curPct.format("%.1f") + "% | " + expPct.format("%.1f") + "%";
-            _deltaValue = curPct - expPct;
-            _deltaLabel = ((_deltaValue >= 0) ? "+" : "") + _deltaValue.format("%.1f") + "%";
-            _statusLabel = (_deltaValue >= 0) ? "On Track" : "Step now";
+            var delta = curPct - expPct;
+
+            _displayData = {
+                "line1" => info.steps.toString() + " / " + info.stepGoal.toString(),
+                "line2" => curPct.format("%.1f") + "% | " + expPct.format("%.1f") + "%",
+                "delta" => ((delta >= 0) ? "+" : "") + delta.format("%.1f") + "%",
+                "status" => (delta >= 0) ? "On Track" : "Step now",
+                "color" => (delta >= 0) ? 0x00FF00 : 0xFF0000
+            };
         }
+        WatchUi.requestUpdate();
+    }
 
+    function onUpdate(dc as Graphics.Dc) {
         dc.setColor(0x000000, 0x000000); dc.clear();
-        var cx = dc.getWidth() / 2, h = dc.getHeight();
+        if (_displayData.isEmpty()) { return; }
 
+        var cx = dc.getWidth() / 2, h = dc.getHeight();
         dc.setColor(0xAAAAAA, -1);
         dc.drawText(cx, h * 0.18, Graphics.FONT_XTINY, "Steps Monitor", 1);
         dc.setColor(0xFFFFFF, -1);
-        dc.drawText(cx, h * 0.30, Graphics.FONT_SMALL, _line1, 1);
+        dc.drawText(cx, h * 0.30, Graphics.FONT_SMALL, _displayData["line1"], 1);
         dc.setColor(0xAAAAAA, -1);
-        dc.drawText(cx, h * 0.43, Graphics.FONT_XTINY, _line2, 1);
-        dc.setColor((_deltaValue >= 0) ? 0x00FF00 : 0xFF0000, -1);
-        dc.drawText(cx, h * 0.55, Graphics.FONT_LARGE, _deltaLabel, 1);
+        dc.drawText(cx, h * 0.43, Graphics.FONT_XTINY, _displayData["line2"], 1);
+        dc.setColor(_displayData["color"], -1);
+        dc.drawText(cx, h * 0.55, Graphics.FONT_LARGE, _displayData["delta"], 1);
         dc.setColor(0xFFFFFF, -1);
-        dc.drawText(cx, h * 0.78, Graphics.FONT_MEDIUM, _statusLabel, 1);
+        dc.drawText(cx, h * 0.78, Graphics.FONT_MEDIUM, _displayData["status"], 1);
     }
 }
