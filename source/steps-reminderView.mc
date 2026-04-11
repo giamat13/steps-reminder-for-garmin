@@ -60,49 +60,91 @@ class MigrationDelegate extends WatchUi.BehaviorDelegate {
 
 // --- מסך ראשי (Main View) ---
 class steps_reminderView extends WatchUi.View {
-    private var _displayData as Dictionary = {};
+    private var _displayData as Array<Dictionary> = [] as Array<Dictionary>;
+    private var _currentScreen = 0;
 
     function initialize() { View.initialize(); }
 
     // פועל רק כשנכנסים למסך - חוסך סוללה משמעותית
     function onShow() {
-        calculateData();
+        calculateData(true);
     }
 
-    function calculateData() {
+    function nextScreen() as Void {
+        if (_displayData.size() == 0) { return; }
+        var nextIndex = (_currentScreen + 1) % _displayData.size();
+        calculateData(false);
+        if (_displayData.size() == 0) { return; }
+        _currentScreen = nextIndex % _displayData.size();
+        WatchUi.requestUpdate();
+    }
+
+    function buildScreen(title as String, current as Number, goal as Number, expectedPct as Float) as Dictionary {
+        var curPct = (current.toFloat() / goal.toFloat()) * 100.0;
+        var delta = curPct - expectedPct;
+
+        return {
+            "title" => title,
+            "line1" => current.toString() + " / " + goal.toString(),
+            "line2" => curPct.format("%.1f") + "% | " + expectedPct.format("%.1f") + "%",
+            "delta" => ((delta >= 0) ? "+" : "") + delta.format("%.1f") + "%",
+            "status" => (delta >= 0) ? "On Track" : "Move!",
+            "color" => (delta >= 0) ? 0x00FF00 : 0xFF0000
+        };
+    }
+
+    function calculateData(resetScreen as Boolean) {
         var info = ActivityMonitor.getInfo();
         var app = Application.getApp() as steps_reminderApp;
+        _displayData = [] as Array<Dictionary>;
+        if (resetScreen) {
+            _currentScreen = 0;
+        }
         
-        if (info != null && info.steps != null && info.stepGoal != null && info.stepGoal > 0) {
-            var curPct = (info.steps.toFloat() / info.stepGoal.toFloat()) * 100.0;
-            var expPct = app.getExpectedProgressForNow();
-            var delta = curPct - expPct;
+        if (info != null) {
+            if (info.steps != null && info.stepGoal != null && info.stepGoal > 0) {
+                _displayData.add(buildScreen("Steps Monitor", info.steps, info.stepGoal, app.getExpectedProgressForNow()));
+            }
 
-            _displayData = {
-                "line1" => info.steps.toString() + " / " + info.stepGoal.toString(),
-                "line2" => curPct.format("%.1f") + "% | " + expPct.format("%.1f") + "%",
-                "delta" => ((delta >= 0) ? "+" : "") + delta.format("%.1f") + "%",
-                "status" => (delta >= 0) ? "On Track" : "Step now",
-                "color" => (delta >= 0) ? 0x00FF00 : 0xFF0000
-            };
+            if ((info has :floorsClimbed) && (info has :floorsClimbedGoal) && info.floorsClimbed != null && info.floorsClimbedGoal != null && info.floorsClimbedGoal > 0) {
+                _displayData.add(buildScreen("Floors", info.floorsClimbed, info.floorsClimbedGoal, app.getLinearExpectedProgressForNow()));
+            }
         }
         WatchUi.requestUpdate();
     }
 
     function onUpdate(dc as Graphics.Dc) {
         dc.setColor(0x000000, 0x000000); dc.clear();
-        if (_displayData.isEmpty()) { return; }
+        if (_displayData.size() == 0) { return; }
 
+        var screen = _displayData[_currentScreen];
         var cx = dc.getWidth() / 2, h = dc.getHeight();
+
         dc.setColor(0xAAAAAA, -1);
-        dc.drawText(cx, h * 0.18, Graphics.FONT_XTINY, "Steps Monitor", 1);
+        dc.drawText(cx, h * 0.12, Graphics.FONT_XTINY, screen["title"], 1);
+        dc.drawText(cx, h * 0.20, Graphics.FONT_XTINY, (_currentScreen + 1).toString() + "/" + _displayData.size().toString(), 1);
+
         dc.setColor(0xFFFFFF, -1);
-        dc.drawText(cx, h * 0.30, Graphics.FONT_SMALL, _displayData["line1"], 1);
+        dc.drawText(cx, h * 0.32, Graphics.FONT_SMALL, screen["line1"], 1);
         dc.setColor(0xAAAAAA, -1);
-        dc.drawText(cx, h * 0.43, Graphics.FONT_XTINY, _displayData["line2"], 1);
-        dc.setColor(_displayData["color"], -1);
-        dc.drawText(cx, h * 0.55, Graphics.FONT_LARGE, _displayData["delta"], 1);
+        dc.drawText(cx, h * 0.45, Graphics.FONT_XTINY, screen["line2"], 1);
+        dc.setColor(screen["color"], -1);
+        dc.drawText(cx, h * 0.57, Graphics.FONT_LARGE, screen["delta"], 1);
         dc.setColor(0xFFFFFF, -1);
-        dc.drawText(cx, h * 0.78, Graphics.FONT_MEDIUM, _displayData["status"], 1);
+        dc.drawText(cx, h * 0.77, Graphics.FONT_MEDIUM, screen["status"], 1);
+    }
+}
+
+class steps_reminderDelegate extends WatchUi.BehaviorDelegate {
+    private var _view as steps_reminderView;
+
+    function initialize(view as steps_reminderView) {
+        BehaviorDelegate.initialize();
+        _view = view;
+    }
+
+    function onSelect() as Boolean {
+        _view.nextScreen();
+        return true;
     }
 }

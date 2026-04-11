@@ -25,13 +25,15 @@ class steps_reminderApp extends Application.AppBase {
             return [ new MigrationView(data), new MigrationDelegate() ];
         }
         _historyData = (data instanceof Array) ? data : [] as Array<Array>;
-        return [ new steps_reminderView() ];
+        var mainView = new steps_reminderView();
+        return [ mainView, new steps_reminderDelegate(mainView) ];
     }
 
     function finishMigration(migratedData as Array<Array>) as Void {
         _historyData = migratedData;
         saveHistoryData();
-        WatchUi.switchToView(new steps_reminderView(), null, WatchUi.SLIDE_IMMEDIATE);
+        var mainView = new steps_reminderView();
+        WatchUi.switchToView(mainView, new steps_reminderDelegate(mainView), WatchUi.SLIDE_IMMEDIATE);
     }
 
     function onStart(state as Dictionary?) as Void {
@@ -52,6 +54,17 @@ class steps_reminderApp extends Application.AppBase {
         }
     }
 
+    function getLinearExpectedProgressForNow() as Float {
+        var now = Time.now();
+        var t = Time.Gregorian.info(now, Time.FORMAT_SHORT);
+        
+        var startHour = 7, endHour = 23;
+        var minutesSinceStart = (t.hour - startHour) * 60.0 + t.min;
+        var linearPercent = (minutesSinceStart / ((endHour - startHour) * 60.0)) * 100.0;
+        linearPercent = (linearPercent < 0) ? 0.0 : (linearPercent > 100 ? 100.0 : linearPercent);
+        return linearPercent;
+    }
+
     // תיקון שורה 32: וידוא טעינת נתונים לפני חישוב
     function getExpectedProgressForNow() as Float {
         if (_historyData == null) {
@@ -62,10 +75,7 @@ class steps_reminderApp extends Application.AppBase {
         var now = Time.now();
         var t = Time.Gregorian.info(now, Time.FORMAT_SHORT);
         
-        var startHour = 7, endHour = 23;
-        var minutesSinceStart = (t.hour - startHour) * 60.0 + t.min;
-        var linearPercent = (minutesSinceStart / ((endHour - startHour) * 60.0)) * 100.0;
-        linearPercent = (linearPercent < 0) ? 0.0 : (linearPercent > 100 ? 100.0 : linearPercent);
+        var linearPercent = getLinearExpectedProgressForNow();
 
         if (_historyData == null || _historyData.size() < MIN_SAMPLES_FOR_LEARNING) {
             return linearPercent;
@@ -108,7 +118,7 @@ class steps_reminderApp extends Application.AppBase {
         var currentPct = (info.steps.toFloat() / info.stepGoal.toFloat()) * 100.0;
         var delta = currentPct - expectedPct;
 
-        // התראה אם אנחנו בסטטוס Step Now (דלתא שלילית)
+        // התראה אם אנחנו בסטטוס Move! (דלתא שלילית)
         if (delta < 0) {
             if (Attention has :vibrate) {
                 // רטט ייחודי: פעימה ארוכה ושתיים קצרות כדי שתזהה שזה זה
